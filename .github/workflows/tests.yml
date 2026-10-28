@@ -1,0 +1,26 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m pytest tests -q
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m pytest tests/test_docker_live.py -q
+        env:
+          REPOLAUNCH_RUN_DOCKER_TESTS: '1'

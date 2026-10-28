@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repolaunch-local"
+version = "0.1.0"
+description = "Inspect, approve, run and verify public Python repositories in Docker."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.32,<1", "httpx>=0.27,<1",
+  "langgraph>=1,<2", "langchain>=1,<2", "langchain-openai>=1,<2", "sqlalchemy>=2,<3", "pymysql>=1,<2", "python-dotenv>=1,<2"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+integrations = ["mcp>=1.20,<2", "langfuse>=4,<5", "pymilvus>=2.6,<3"]
+
+[project.scripts]
+repolaunch = "repolaunch.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["repolaunch*"]
+
+[tool.setuptools.package-data]
+repolaunch = ["static/*", "fixtures/*", "fixtures/docker-check/*", "fixtures/repair-check/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

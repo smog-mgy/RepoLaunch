@@ -1,0 +1,3 @@
+mcp>=1.20,<2
+langfuse>=4,<5
+pymilvus>=2.6,<3

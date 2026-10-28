@@ -1,0 +1,534 @@
+{
+  "name": "repolaunch-integrations",
+  "services": {
+    "mysql": {
+      "image": "mysql:8.4.13",
+      "restart": "unless-stopped",
+      "mem_limit": "1g",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "MYSQL_ROOT_PASSWORD": "${MYSQL_ROOT_PASSWORD}",
+        "MYSQL_DATABASE": "repolaunch",
+        "MYSQL_USER": "repolaunch",
+        "MYSQL_PASSWORD": "${MYSQL_PASSWORD}",
+        "TZ": "UTC"
+      },
+      "command": [
+        "--innodb-buffer-pool-size=256M",
+        "--max-connections=50",
+        "--lower-case-table-names=1"
+      ],
+      "ports": [
+        "127.0.0.1:${MYSQL_PORT}:3306"
+      ],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../.repolaunch/services/mysql",
+          "target": "/var/lib/mysql"
+        }
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h127.0.0.1 -uroot --silent"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "40s"
+      }
+    },
+    "etcd": {
+      "image": "quay.io/coreos/etcd:v3.5.25",
+      "restart": "unless-stopped",
+      "mem_limit": "512m",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "ETCD_AUTO_COMPACTION_MODE": "revision",
+        "ETCD_AUTO_COMPACTION_RETENTION": "1000",
+        "ETCD_QUOTA_BACKEND_BYTES": "4294967296",
+        "ETCD_SNAPSHOT_COUNT": "50000"
+      },
+      "command": [
+        "etcd",
+        "--advertise-client-urls=http://etcd:2379",
+        "--listen-client-urls=http://0.0.0.0:2379",
+        "--data-dir=/etcd"
+      ],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../.repolaunch/services/etcd",
+          "target": "/etcd"
+        }
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "etcdctl",
+          "endpoint",
+          "health"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "20s"
+      }
+    },
+    "minio": {
+      "image": "bitnamilegacy/minio:2025.7.23-debian-12-r5",
+      "restart": "unless-stopped",
+      "mem_limit": "1g",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "MINIO_ROOT_USER": "repolaunch",
+        "MINIO_ROOT_PASSWORD": "${MINIO_ROOT_PASSWORD}"
+      },
+      "entrypoint": [
+        "/bin/sh",
+        "-c"
+      ],
+      "command": [
+        "mkdir -p /data/langfuse && exec /opt/bitnami/minio/bin/minio server /data --address ':9000' --console-address ':9001'"
+      ],
+      "ports": [
+        "127.0.0.1:${MINIO_PORT}:9000",
+        "127.0.0.1:${MINIO_CONSOLE_PORT}:9001"
+      ],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../.repolaunch/services/minio",
+          "target": "/data"
+        }
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "/bin/bash",
+          "-ec",
+          "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /minio/health/live HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3; read -r protocol status rest <&3; test \"$$status\" = 200"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "20s"
+      }
+    },
+    "milvus": {
+      "image": "milvusdb/milvus:v2.6.11",
+      "restart": "unless-stopped",
+      "mem_limit": "4g",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "command": [
+        "milvus",
+        "run",
+        "standalone"
+      ],
+      "security_opt": [
+        "seccomp:unconfined"
+      ],
+      "environment": {
+        "ETCD_ENDPOINTS": "etcd:2379",
+        "MINIO_ADDRESS": "minio:9000",
+        "MINIO_ACCESS_KEY_ID": "repolaunch",
+        "MINIO_SECRET_ACCESS_KEY": "${MINIO_ROOT_PASSWORD}",
+        "MINIO_REGION": "us-east-1"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../.repolaunch/services/milvus",
+          "target": "/var/lib/milvus"
+        }
+      ],
+      "ports": [
+        "127.0.0.1:${MILVUS_PORT}:19530",
+        "127.0.0.1:${MILVUS_HEALTH_PORT}:9091"
+      ],
+      "depends_on": {
+        "etcd": {
+          "condition": "service_healthy"
+        },
+        "minio": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:9091/healthz"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "90s"
+      }
+    },
+    "postgres": {
+      "image": "postgres:16.15-bookworm",
+      "restart": "unless-stopped",
+      "mem_limit": "1g",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "POSTGRES_USER": "langfuse",
+        "POSTGRES_DB": "langfuse",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "PGDATA": "/var/lib/postgresql/data/pgdata",
+        "TZ": "UTC",
+        "PGTZ": "UTC"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../.repolaunch/services/postgres",
+          "target": "/var/lib/postgresql/data"
+        }
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "langfuse",
+          "-d",
+          "langfuse"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "20s"
+      }
+    },
+    "redis": {
+      "image": "redis:7.2.16-alpine",
+      "restart": "unless-stopped",
+      "mem_limit": "512m",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "REDISCLI_AUTH": "${REDIS_PASSWORD}"
+      },
+      "command": [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD}",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "noeviction",
+        "--appendonly",
+        "yes"
+      ],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../.repolaunch/services/redis",
+          "target": "/data"
+        }
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "20s"
+      }
+    },
+    "clickhouse": {
+      "image": "clickhouse/clickhouse-server:25.3.9.72",
+      "restart": "unless-stopped",
+      "mem_limit": "3g",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "user": "101:101",
+      "environment": {
+        "CLICKHOUSE_DB": "default",
+        "CLICKHOUSE_USER": "langfuse",
+        "CLICKHOUSE_PASSWORD": "${CLICKHOUSE_PASSWORD}",
+        "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT": "1",
+        "TZ": "UTC"
+      },
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "clickhouse-data",
+          "target": "/var/lib/clickhouse"
+        },
+        {
+          "type": "volume",
+          "source": "clickhouse-logs",
+          "target": "/var/log/clickhouse-server"
+        }
+      ],
+      "ulimits": {
+        "nofile": {
+          "soft": 262144,
+          "hard": 262144
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8123/ping"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "20s"
+      }
+    },
+    "langfuse-worker": {
+      "image": "langfuse/langfuse-worker:3.202.0",
+      "restart": "unless-stopped",
+      "mem_limit": "2g",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "DATABASE_URL": "postgresql://langfuse:${POSTGRES_PASSWORD}@postgres:5432/langfuse",
+        "SALT": "${LANGFUSE_SALT}",
+        "ENCRYPTION_KEY": "${LANGFUSE_ENCRYPTION_KEY}",
+        "NEXTAUTH_URL": "http://127.0.0.1:${LANGFUSE_PORT}",
+        "TELEMETRY_ENABLED": "false",
+        "LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES": "false",
+        "CLICKHOUSE_MIGRATION_URL": "clickhouse://clickhouse:9000",
+        "CLICKHOUSE_URL": "http://clickhouse:8123",
+        "CLICKHOUSE_USER": "langfuse",
+        "CLICKHOUSE_PASSWORD": "${CLICKHOUSE_PASSWORD}",
+        "CLICKHOUSE_CLUSTER_ENABLED": "false",
+        "REDIS_HOST": "redis",
+        "REDIS_PORT": "6379",
+        "REDIS_AUTH": "${REDIS_PASSWORD}",
+        "REDIS_TLS_ENABLED": "false",
+        "LANGFUSE_S3_EVENT_UPLOAD_BUCKET": "langfuse",
+        "LANGFUSE_S3_EVENT_UPLOAD_REGION": "us-east-1",
+        "LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID": "repolaunch",
+        "LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY": "${MINIO_ROOT_PASSWORD}",
+        "LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT": "http://minio:9000",
+        "LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE": "true",
+        "LANGFUSE_S3_EVENT_UPLOAD_PREFIX": "events/",
+        "LANGFUSE_S3_MEDIA_UPLOAD_BUCKET": "langfuse",
+        "LANGFUSE_S3_MEDIA_UPLOAD_REGION": "us-east-1",
+        "LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID": "repolaunch",
+        "LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY": "${MINIO_ROOT_PASSWORD}",
+        "LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT": "http://127.0.0.1:${MINIO_PORT}",
+        "LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE": "true",
+        "LANGFUSE_S3_MEDIA_UPLOAD_PREFIX": "media/",
+        "LANGFUSE_S3_BATCH_EXPORT_ENABLED": "false",
+        "HOSTNAME": "0.0.0.0"
+      },
+      "ports": [
+        "127.0.0.1:${LANGFUSE_WORKER_PORT}:3030"
+      ],
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "redis": {
+          "condition": "service_healthy"
+        },
+        "clickhouse": {
+          "condition": "service_healthy"
+        },
+        "minio": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3030/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "90s"
+      }
+    },
+    "langfuse-web": {
+      "image": "langfuse/langfuse:3.202.0",
+      "restart": "unless-stopped",
+      "mem_limit": "2g",
+      "labels": {
+        "repolaunch.stack": "integrations"
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "environment": {
+        "DATABASE_URL": "postgresql://langfuse:${POSTGRES_PASSWORD}@postgres:5432/langfuse",
+        "SALT": "${LANGFUSE_SALT}",
+        "ENCRYPTION_KEY": "${LANGFUSE_ENCRYPTION_KEY}",
+        "NEXTAUTH_URL": "http://127.0.0.1:${LANGFUSE_PORT}",
+        "TELEMETRY_ENABLED": "false",
+        "LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES": "false",
+        "CLICKHOUSE_MIGRATION_URL": "clickhouse://clickhouse:9000",
+        "CLICKHOUSE_URL": "http://clickhouse:8123",
+        "CLICKHOUSE_USER": "langfuse",
+        "CLICKHOUSE_PASSWORD": "${CLICKHOUSE_PASSWORD}",
+        "CLICKHOUSE_CLUSTER_ENABLED": "false",
+        "REDIS_HOST": "redis",
+        "REDIS_PORT": "6379",
+        "REDIS_AUTH": "${REDIS_PASSWORD}",
+        "REDIS_TLS_ENABLED": "false",
+        "LANGFUSE_S3_EVENT_UPLOAD_BUCKET": "langfuse",
+        "LANGFUSE_S3_EVENT_UPLOAD_REGION": "us-east-1",
+        "LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID": "repolaunch",
+        "LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY": "${MINIO_ROOT_PASSWORD}",
+        "LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT": "http://minio:9000",
+        "LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE": "true",
+        "LANGFUSE_S3_EVENT_UPLOAD_PREFIX": "events/",
+        "LANGFUSE_S3_MEDIA_UPLOAD_BUCKET": "langfuse",
+        "LANGFUSE_S3_MEDIA_UPLOAD_REGION": "us-east-1",
+        "LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID": "repolaunch",
+        "LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY": "${MINIO_ROOT_PASSWORD}",
+        "LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT": "http://127.0.0.1:${MINIO_PORT}",
+        "LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE": "true",
+        "LANGFUSE_S3_MEDIA_UPLOAD_PREFIX": "media/",
+        "LANGFUSE_S3_BATCH_EXPORT_ENABLED": "false",
+        "HOSTNAME": "0.0.0.0",
+        "PORT": "3000",
+        "NEXTAUTH_SECRET": "${LANGFUSE_NEXTAUTH_SECRET}",
+        "LANGFUSE_INIT_ORG_ID": "repolaunch-local",
+        "LANGFUSE_INIT_ORG_NAME": "RepoLaunch Local",
+        "LANGFUSE_INIT_PROJECT_ID": "repolaunch",
+        "LANGFUSE_INIT_PROJECT_NAME": "RepoLaunch",
+        "LANGFUSE_INIT_PROJECT_PUBLIC_KEY": "${LANGFUSE_PUBLIC_KEY}",
+        "LANGFUSE_INIT_PROJECT_SECRET_KEY": "${LANGFUSE_SECRET_KEY}",
+        "LANGFUSE_INIT_USER_EMAIL": "admin@repolaunch.local",
+        "LANGFUSE_INIT_USER_NAME": "RepoLaunch Admin",
+        "LANGFUSE_INIT_USER_PASSWORD": "${LANGFUSE_ADMIN_PASSWORD}",
+        "AUTH_DISABLE_SIGNUP": "true"
+      },
+      "ports": [
+        "127.0.0.1:${LANGFUSE_PORT}:3000"
+      ],
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "redis": {
+          "condition": "service_healthy"
+        },
+        "clickhouse": {
+          "condition": "service_healthy"
+        },
+        "minio": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/api/public/health?failIfDatabaseUnavailable=true').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "120s"
+      }
+    }
+  },
+  "volumes": {
+    "clickhouse-data": {
+      "labels": {
+        "repolaunch.stack": "integrations",
+        "repolaunch.store": "clickhouse-data"
+      }
+    },
+    "clickhouse-logs": {
+      "labels": {
+        "repolaunch.stack": "integrations",
+        "repolaunch.store": "clickhouse-logs"
+      }
+    }
+  }
+}
